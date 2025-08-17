@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-commerce Platform</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .hidden { display: none; }
+        .error { color: red; }
+        ul { list-style: none; padding: 0; }
+        li { margin: 10px 0; }
+        button { margin-left: 10px; padding: 5px 10px; }
+    </style>
+</head>
+<body>
+    <h1>E-commerce Platform</h1>
+
+    <!-- Login Section -->
+    <div id="login-section">
+        <h2>Login</h2>
+        <form id="login-form">
+            <label>Username: <input type="text" id="username" value="user1"></label><br><br>
+            <label>Password: <input type="password" id="password" value="password1"></label><br><br>
+            <button type="submit">Login</button>
+        </form>
+        <p id="login-error" class="error"></p>
+    </div>
+
+    <!-- Products Section -->
+    <div id="products-section" class="hidden">
+        <button id="logout">Logout</button>
+        <h2>Products</h2>
+        <ul id="product-list"></ul>
+        <p id="products-error" class="error"></p>
+        <div id="cart-section">
+            <h3>Cart</h3>
+            <ul id="cart-list"></ul>
+            <button id="checkout" class="hidden">Checkout</button>
+        </div>
+        <p id="checkout-result"></p>
+    </div>
+
+    <script>
+        let token = null;
+        let cart = [];
+
+        // Login
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('http://localhost:3001/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password }),
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    token = data.token;
+                    document.getElementById('login-section').classList.add('hidden');
+                    document.getElementById('products-section').classList.remove('hidden');
+                    loadProducts();
+                } else {
+                    document.getElementById('login-error').textContent = data.error || 'Login failed';
+                }
+            } catch (err) {
+                document.getElementById('login-error').textContent = 'Network error';
+            }
+        });
+
+        // Logout
+        document.getElementById('logout').addEventListener('click', () => {
+            token = null;
+            cart = [];
+            document.getElementById('products-section').classList.add('hidden');
+            document.getElementById('login-section').classList.remove('hidden');
+            document.getElementById('product-list').innerHTML = '';
+            document.getElementById('cart-list').innerHTML = '';
+            document.getElementById('checkout').classList.add('hidden');
+            document.getElementById('checkout-result').textContent = '';
+        });
+
+        // Load Products
+        async function loadProducts() {
+            try {
+                const response = await fetch('http://localhost:3000/api/products', {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                const products = await response.json();
+                if (response.ok) {
+                    const list = document.getElementById('product-list');
+                    list.innerHTML = '';
+                    products.forEach(product => {
+                        const li = document.createElement('li');
+                        li.textContent = `${product.name} - ₹${product.price.toLocaleString('en-IN')} (Stock: ${product.stock})`;
+                        const btn = document.createElement('button');
+                        btn.textContent = 'Add to Cart';
+                        btn.onclick = () => addToCart(product.id);
+                        li.appendChild(btn);
+                        list.appendChild(li);
+                    });
+                } else {
+                    document.getElementById('products-error').textContent = products.error || 'Failed to load products';
+                }
+            } catch (err) {
+                document.getElementById('products-error').textContent = 'Network error';
+            }
+        }
+
+        // Add to Cart
+        async function addToCart(productId) {
+            try {
+                const response = await fetch('http://localhost:3000/api/cart', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ productId, quantity: 1 }),
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    cart.push({ productId, quantity: 1 });
+                    updateCart();
+                } else {
+                    document.getElementById('products-error').textContent = data.error || 'Failed to add to cart';
+                }
+            } catch (err) {
+                document.getElementById('products-error').textContent = 'Network error';
+            }
+        }
+
+        // Update Cart Display
+        function updateCart() {
+            const cartList = document.getElementById('cart-list');
+            cartList.innerHTML = '';
+            cart.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = `Product ID: ${item.productId}, Quantity: ${item.quantity}`;
+                cartList.appendChild(li);
+            });
+            document.getElementById('checkout').classList.toggle('hidden', cart.length === 0);
+        }
+
+        // Checkout
+        document.getElementById('checkout').addEventListener('click', async () => {
+            try {
+                // Create Order
+                const orderResponse = await fetch('http://localhost:4000/api/create-order', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ userId: '1', items: cart }),
+                });
+                if (!orderResponse.ok) {
+                    const orderError = await orderResponse.text();
+                    throw new Error(`Order failed: ${orderError}`);
+                }
+                const orderData = await orderResponse.json();
+
+                // Process Payment
+                const paymentResponse = await fetch('http://localhost:4001/api/process-payment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ orderId: orderData.orderId, amount: 83000, paymentMethod: 'credit_card' }),
+                });
+                if (!paymentResponse.ok) {
+                    const paymentError = await paymentResponse.text();
+                    throw new Error(`Payment failed: ${paymentError}`);
+                }
+                const paymentData = await paymentResponse.json();
+
+                document.getElementById('checkout-result').textContent = 
+                    `Order ${orderData.orderId} created. Payment ${paymentData.transactionId} completed. Amount: ₹${(83000).toLocaleString('en-IN')}`;
+                cart = [];
+                updateCart();
+            } catch (err) {
+                console.error(err);
+                document.getElementById('checkout-result').textContent = err.message || 'Checkout failed';
+            }
+        });
+    </script>
+</body>
+</html>
